@@ -31,6 +31,11 @@ BUILDING_FLOOR_FIELDS = [
     "levels",
     "Detected_Floors",
 ]
+BUILDING_RULE_PACKAGES = [
+    "BuildingColo",
+    "BuildingColor",
+    "BuildingColor.cga",
+]
 
 LOT_ID_FIELD = "lot_id"
 BLOCK_ID_FIELD = "block_id"
@@ -91,6 +96,14 @@ def safe_get_attribute(obj, attr_name, default_value=None):
 def safe_get_rule_attribute(obj, attr_name, default_value=None):
     try:
         value = ce.getRuleAttribute(obj, attr_name)
+        return default_value if value is None else value
+    except Exception:
+        return default_value
+
+
+def safe_get_rule_package_attribute(obj, package_name, attr_name, default_value=None):
+    try:
+        value = ce.getRuleAttribute(obj, package_name, attr_name)
         return default_value if value is None else value
     except Exception:
         return default_value
@@ -164,6 +177,16 @@ def get_building_floors(building):
     # Attributes still contain a stale/default value. Prefer rule attributes.
     for field_name in BUILDING_FLOOR_FIELDS:
         candidates.append(to_float(safe_get_rule_attribute(building, field_name), 0.0))
+
+    # Some CityEngine versions expose rule attributes under the rule package
+    # group shown in Inspector, for example BuildingColo > building__levels.
+    for package_name in BUILDING_RULE_PACKAGES:
+        for field_name in BUILDING_FLOOR_FIELDS:
+            candidates.append(to_float(safe_get_rule_package_attribute(building, package_name, field_name), 0.0))
+            candidates.append(to_float(safe_get_rule_attribute(building, package_name + "." + field_name), 0.0))
+            candidates.append(to_float(safe_get_rule_attribute(building, package_name + "/" + field_name), 0.0))
+            candidates.append(to_float(safe_get_attribute(building, package_name + "." + field_name), 0.0))
+            candidates.append(to_float(safe_get_attribute(building, package_name + "/" + field_name), 0.0))
 
     for field_name in BUILDING_FLOOR_FIELDS:
         candidates.append(to_float(safe_get_attribute(building, field_name), 0.0))
@@ -676,6 +699,8 @@ def process_buildings(buildings, lot_index, block_index):
         b_area = polygon_area_xz(poly)
         b_gfa = b_area * floors
 
+        safe_set_attribute(building, FLOORS_FIELD, float(floors))
+        safe_set_attribute(building, "building_levels", float(floors))
         safe_set_attribute(building, OUT_BUILDING_GFA_FIELD, float(b_gfa))
         safe_set_attribute(building, OUT_BUILDING_FLOORS_FIELD, float(floors))
 

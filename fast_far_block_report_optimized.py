@@ -51,7 +51,7 @@ MAX_INDEX_CELLS_PER_POLYGON = 400
 BLOCK_ID_PREFIX = "block"
 BLOCK_ID_PADDING = 2
 OVERWRITE_BLOCK_IDS = True
-USE_NEAREST_BLOCK_FALLBACK = True
+USE_NEAREST_BLOCK_FALLBACK = False
 
 
 # ==================================================
@@ -196,6 +196,20 @@ def squared_distance(a, b):
     return (a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1])
 
 
+def point_on_segment(pt, a, b, tolerance=1e-6):
+    x, z = pt
+    x1, z1 = a
+    x2, z2 = b
+    cross = (x - x1) * (z2 - z1) - (z - z1) * (x2 - x1)
+    if abs(cross) > tolerance:
+        return False
+    dot = (x - x1) * (x2 - x1) + (z - z1) * (z2 - z1)
+    if dot < -tolerance:
+        return False
+    segment_len_sq = (x2 - x1) * (x2 - x1) + (z2 - z1) * (z2 - z1)
+    return dot <= segment_len_sq + tolerance
+
+
 def is_inside_fast(pt, poly):
     x, z = pt
     inside = False
@@ -207,6 +221,14 @@ def is_inside_fast(pt, poly):
         ):
             inside = not inside
     return inside
+
+
+def is_inside_or_on_boundary(pt, poly):
+    n = len(poly)
+    for i in range(n):
+        if point_on_segment(pt, poly[i], poly[(i + 1) % n]):
+            return True
+    return is_inside_fast(pt, poly)
 
 
 def median(values, default_value):
@@ -279,7 +301,7 @@ class SpatialIndex(object):
 
 def find_containing_record(pt, spatial_index):
     for record in spatial_index.candidates_for_point(pt):
-        if bbox_contains_point(record["bbox"], pt) and is_inside_fast(pt, record["poly"]):
+        if bbox_contains_point(record["bbox"], pt) and is_inside_or_on_boundary(pt, record["poly"]):
             return record
     return None
 
@@ -332,7 +354,7 @@ def find_best_block_for_lot(poly, bbox, block_index):
             continue
         score = 0
         for pt in points:
-            if bbox_contains_point(record["bbox"], pt) and is_inside_fast(pt, record["poly"]):
+            if bbox_contains_point(record["bbox"], pt) and is_inside_or_on_boundary(pt, record["poly"]):
                 score += 1
         if score > best_score:
             best_score = score
@@ -461,7 +483,16 @@ def build_block_map(blocks):
         safe_set_attribute(block, OUT_BLOCK_ID_FIELD, block_id)
         safe_set_attribute(block, OUT_BLOCK_AREA_FIELD, float(area))
 
-        block_map.append({"obj": block, "id": str(block_id), "poly": poly, "bbox": bbox, "area": area})
+        block_map.append(
+            {
+                "obj": block,
+                "id": str(block_id),
+                "name": safe_get_name(block) or str(block_id),
+                "poly": poly,
+                "bbox": bbox,
+                "area": area,
+            }
+        )
 
     safe_print("Block map дууслаа: " + str(len(block_map)))
     return block_map
@@ -487,7 +518,7 @@ def build_lot_map(lots, block_index):
         block_status = "UNMATCHED"
         block_record, block_status = find_best_block_for_lot(poly, bbox, block_index)
         if block_record:
-            block_id = block_record["id"]
+            block_id = block_record["name"]
             lot_block_matched += 1
             if block_status == "NEAREST":
                 lot_block_nearest += 1

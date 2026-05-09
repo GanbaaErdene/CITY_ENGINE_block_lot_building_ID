@@ -390,6 +390,51 @@ def name_startswith(obj, prefix):
     return safe_get_name(obj).lower().startswith(prefix.lower())
 
 
+def object_key(obj):
+    try:
+        return "oid_" + str(ce.getOID(obj))
+    except Exception:
+        return "obj_" + str(id(obj))
+
+
+def append_unique(target, source):
+    seen = {}
+    for obj in target:
+        seen[object_key(obj)] = True
+    for obj in source:
+        key = object_key(obj)
+        if key not in seen:
+            target.append(obj)
+            seen[key] = True
+
+
+def is_lot_shape(obj):
+    name = safe_get_name(obj).lower()
+    shape_type = get_attribute_text(obj, "shapeType", "").lower()
+    lot_id_value = get_attribute_text(obj, LOT_ID_FIELD, "")
+    return name == "lot" or name.startswith("lot") or shape_type == "lot" or lot_id_value != ""
+
+
+def is_block_shape(obj):
+    name = safe_get_name(obj).lower()
+    shape_type = get_attribute_text(obj, "shapeType", "").lower()
+    return name == "block" or name.startswith("block") or shape_type == "block"
+
+
+def find_scene_blocks():
+    blocks = []
+    safe_print("Scene дотроос Block объектууд хайж байна...")
+
+    append_unique(blocks, ce.getObjectsFrom(ce.scene, ce.isShape, ce.withName("'Block'")))
+    append_unique(blocks, ce.getObjectsFrom(ce.scene, ce.isShape, ce.withName("'block'")))
+
+    scene_shapes = ce.getObjectsFrom(ce.scene, ce.isShape)
+    append_unique(blocks, [shape for shape in scene_shapes if is_block_shape(shape)])
+
+    safe_print("Scene block хайлт: " + str(len(blocks)) + " block олдлоо.")
+    return blocks
+
+
 # ==================================================
 # DATA COLLECTION
 # ==================================================
@@ -408,14 +453,11 @@ def get_buildings_lots_blocks():
         safe_print("Сонгогдсон Block нэртэй объект: " + str(len(selected_blocks_by_name)))
 
         for shape in selected_shapes:
-            name = safe_get_name(shape)
             building_value = get_attribute_text(shape, "building", "")
-            lot_id_value = get_attribute_text(shape, LOT_ID_FIELD, "")
-            block_id_value = get_attribute_text(shape, BLOCK_ID_FIELD, "")
 
-            if name.lower() == "lot" or name.lower().startswith("lot") or lot_id_value != "":
+            if is_lot_shape(shape):
                 lots.append(shape)
-            elif name.lower() == "block" or name.lower().startswith("block") or block_id_value != "":
+            elif is_block_shape(shape):
                 blocks.append(shape)
             elif building_value != "":
                 buildings.append(shape)
@@ -425,6 +467,10 @@ def get_buildings_lots_blocks():
         for block in selected_blocks_by_name:
             if block not in blocks:
                 blocks.append(block)
+
+        if not blocks:
+            safe_print("Selection дотор Block олдсонгүй. Scene-ээс block хайна...")
+            blocks = find_scene_blocks()
 
         safe_print(
             "Selection ангилалт:"
@@ -448,9 +494,9 @@ def get_buildings_lots_blocks():
         blocks = ce.getObjectsFrom(ce.scene, ce.withName("'Block'"))
 
     if not blocks:
-        blocks = [s for s in ce.getObjectsFrom(ce.scene, ce.isShape) if name_startswith(s, "block")]
+        blocks = find_scene_blocks()
     if not lots:
-        lots = [s for s in ce.getObjectsFrom(ce.scene, ce.isShape) if name_startswith(s, "lot")]
+        lots = [s for s in ce.getObjectsFrom(ce.scene, ce.isShape) if is_lot_shape(s)]
 
     return buildings, lots, blocks
 
@@ -683,6 +729,8 @@ def run_optimized_script():
         raise Exception("OSM_Buildings давхаргаас барилга олдсонгүй!")
     if not lots:
         raise Exception("Lot олдсонгүй!")
+    if not blocks:
+        raise Exception("Block олдсонгүй! Lot-д Block_ID оруулахын тулд Block shape-үүд scene-д байх эсвэл selection-д сонгогдсон байх ёстой.")
 
     block_map = build_block_map(blocks)
 

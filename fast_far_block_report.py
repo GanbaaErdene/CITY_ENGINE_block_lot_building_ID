@@ -132,7 +132,11 @@ def get_building_floors(building):
     # It only reads candidates and returns a floor count used for GFA computation.
     candidates = [
         # Prefer explicit detected floors when present (user-provided / upstream).
+        # Read both object attributes and rule attributes, and support common naming variants.
         to_float(safe_get_attribute(building, OUT_BUILDING_FLOORS_FIELD), 0.0),
+        to_float(safe_get_rule_attribute(building, OUT_BUILDING_FLOORS_FIELD), 0.0),
+        to_float(safe_get_attribute(building, "Detected_floor"), 0.0),
+        to_float(safe_get_rule_attribute(building, "Detected_floor"), 0.0),
         to_float(safe_get_rule_attribute(building, "building__levels"), 0.0),
         to_float(safe_get_rule_attribute(building, "building_levels"), 0.0),
         to_float(safe_get_attribute(building, "building__levels"), 0.0),

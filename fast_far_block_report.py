@@ -28,6 +28,7 @@ OUT_FAR_FIELD = "FAR"
 OUT_BUILDING_COUNT_FIELD = "Building_Count"
 OUT_BUILDING_GFA_FIELD = "Building_GFA"
 OUT_BUILDING_FLOORS_FIELD = "Detected_Floors"
+OUT_BUILDING_USED_FLOORS_FIELD = "Used_Floors"
 OUT_LOT_MATCH_STATUS_FIELD = "Lot_Match_Status"
 OUT_BLOCK_MATCH_STATUS_FIELD = "Block_Match_Status"
 
@@ -143,14 +144,28 @@ def get_building_floors(building):
         to_float(safe_get_attribute(building, "building_levels"), 0.0),
         to_float(safe_get_attribute(building, "building:levels"), 0.0),
         to_float(safe_get_attribute(building, "levels"), 0.0),
+        to_float(safe_get_attribute(building, "floors"), 0.0),
+        to_float(safe_get_rule_attribute(building, "floors"), 0.0),
+        to_float(safe_get_attribute(building, "num_floors"), 0.0),
+        to_float(safe_get_rule_attribute(building, "num_floors"), 0.0),
         to_float(safe_get_attribute(building, "BuildingColo.building__levels"), 0.0),
         to_float(safe_get_attribute(building, "BuildingColo.building_levels"), 0.0),
         to_float(safe_get_attribute(building, "BuildingColor.building__levels"), 0.0),
         to_float(safe_get_attribute(building, "BuildingColor.building_levels"), 0.0),
+        to_float(safe_get_rule_attribute(building, "BuildingColo.building__levels"), 0.0),
+        to_float(safe_get_rule_attribute(building, "BuildingColo.building_levels"), 0.0),
+        to_float(safe_get_rule_attribute(building, "BuildingColor.building__levels"), 0.0),
+        to_float(safe_get_rule_attribute(building, "BuildingColor.building_levels"), 0.0),
     ]
 
-    height_value = to_float(safe_get_attribute(building, "height"), 0.0)
-    total_height_value = to_float(safe_get_attribute(building, "total_height"), 0.0)
+    height_value = max(
+        to_float(safe_get_attribute(building, "height"), 0.0),
+        to_float(safe_get_rule_attribute(building, "height"), 0.0),
+    )
+    total_height_value = max(
+        to_float(safe_get_attribute(building, "total_height"), 0.0),
+        to_float(safe_get_rule_attribute(building, "total_height"), 0.0),
+    )
 
     if height_value > 0:
         candidates.append(height_value / FLOOR_HEIGHT)
@@ -490,6 +505,7 @@ def process_buildings(buildings, lot_index, block_index, fallback_block_id):
         b_gfa = b_area * floors * FLOOR_HEIGHT
 
         safe_set_attribute(building, OUT_BUILDING_GFA_FIELD, float(b_gfa))
+        safe_set_attribute(building, OUT_BUILDING_USED_FLOORS_FIELD, float(floors))
 
         matched_lot = find_containing_record(center, lot_index)
         if matched_lot:

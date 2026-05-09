@@ -23,6 +23,14 @@ start_time = time.time()
 BUILDING_LAYER_NAME = "OSM_Buildings"
 FLOORS_FIELD = "building__levels"
 DEFAULT_FLOORS = 1.0
+FLOOR_HEIGHT = 3.0
+BUILDING_FLOOR_FIELDS = [
+    "building__levels",
+    "building:levels",
+    "building_levels",
+    "levels",
+    "Detected_Floors",
+]
 
 LOT_ID_FIELD = "lot_id"
 BLOCK_ID_FIELD = "block_id"
@@ -75,6 +83,14 @@ def safe_set_attribute(obj, attr_name, attr_value):
 def safe_get_attribute(obj, attr_name, default_value=None):
     try:
         value = ce.getAttribute(obj, attr_name)
+        return default_value if value is None else value
+    except Exception:
+        return default_value
+
+
+def safe_get_rule_attribute(obj, attr_name, default_value=None):
+    try:
+        value = ce.getRuleAttribute(obj, attr_name)
         return default_value if value is None else value
     except Exception:
         return default_value
@@ -139,6 +155,37 @@ def safe_get_vertices(obj):
         return ce.getVertices(obj)
     except Exception:
         return None
+
+
+def get_building_floors(building):
+    candidates = []
+
+    # CityEngine Inspector can show floor count under Rules while Object
+    # Attributes still contain a stale/default value. Prefer rule attributes.
+    for field_name in BUILDING_FLOOR_FIELDS:
+        candidates.append(to_float(safe_get_rule_attribute(building, field_name), 0.0))
+
+    for field_name in BUILDING_FLOOR_FIELDS:
+        candidates.append(to_float(safe_get_attribute(building, field_name), 0.0))
+
+    height_value = to_float(safe_get_rule_attribute(building, "height"), 0.0)
+    if height_value <= 0:
+        height_value = to_float(safe_get_attribute(building, "height"), 0.0)
+
+    total_height_value = to_float(safe_get_rule_attribute(building, "total_height"), 0.0)
+    if total_height_value <= 0:
+        total_height_value = to_float(safe_get_attribute(building, "total_height"), 0.0)
+
+    if height_value > 0:
+        candidates.append(height_value / FLOOR_HEIGHT)
+    if total_height_value > 0:
+        candidates.append(total_height_value / FLOOR_HEIGHT)
+
+    valid = [value for value in candidates if value > 0]
+    if not valid:
+        return DEFAULT_FLOORS
+
+    return max(DEFAULT_FLOORS, max(valid))
 
 
 # ==================================================
@@ -625,7 +672,7 @@ def process_buildings(buildings, lot_index, block_index):
             stats["inv"] += 1
             continue
 
-        floors = max(1.0, to_float(safe_get_attribute(building, FLOORS_FIELD), DEFAULT_FLOORS))
+        floors = get_building_floors(building)
         b_area = polygon_area_xz(poly)
         b_gfa = b_area * floors
 

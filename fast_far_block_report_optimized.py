@@ -51,6 +51,7 @@ MAX_INDEX_CELLS_PER_POLYGON = 400
 BLOCK_ID_PREFIX = "block"
 BLOCK_ID_PADDING = 2
 OVERWRITE_BLOCK_IDS = True
+USE_NEAREST_BLOCK_FALLBACK = True
 
 
 # ==================================================
@@ -174,9 +175,25 @@ def polygon_bbox(poly):
     return (min(xs), min(zs), max(xs), max(zs))
 
 
+def bbox_center(bbox):
+    if not bbox:
+        return None
+    return ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0)
+
+
 def bbox_contains_point(bbox, pt):
     x, z = pt
     return bbox[0] <= x <= bbox[2] and bbox[1] <= z <= bbox[3]
+
+
+def bbox_intersects(a, b):
+    if not a or not b:
+        return False
+    return not (a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1])
+
+
+def squared_distance(a, b):
+    return (a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1])
 
 
 def is_inside_fast(pt, poly):
@@ -265,6 +282,82 @@ def find_containing_record(pt, spatial_index):
         if bbox_contains_point(record["bbox"], pt) and is_inside_fast(pt, record["poly"]):
             return record
     return None
+
+
+def lot_sample_points(poly, bbox):
+    points = []
+    center = polygon_center_xz(poly)
+    box_center = bbox_center(bbox)
+
+    if center:
+        points.append(center)
+    if box_center and box_center != center:
+        points.append(box_center)
+
+    if poly:
+        step = max(1, len(poly) // 8)
+        for idx in range(0, len(poly), step):
+            points.append(poly[idx])
+            if len(points) >= 12:
+                break
+
+    return points
+
+
+def find_best_block_for_lot(poly, bbox, block_index):
+    if not block_index:
+        return None, "UNMATCHED"
+
+    points = lot_sample_points(poly, bbox)
+    votes = {}
+
+    for pt in points:
+        record = find_containing_record(pt, block_index)
+        if record:
+            record_id = record["id"]
+            votes[record_id] = votes.get(record_id, 0) + 1
+
+    if votes:
+        best_id = max(votes, key=votes.get)
+        for record in block_index.records:
+            if record["id"] == best_id:
+                return record, "MATCHED"
+
+    # If the lot center is outside because of geometry shape, try all overlapping
+    # block bounding boxes and score them by sampled lot points.
+    best_record = None
+    best_score = 0
+    for record in block_index.records:
+        if not bbox_intersects(bbox, record["bbox"]):
+            continue
+        score = 0
+        for pt in points:
+            if bbox_contains_point(record["bbox"], pt) and is_inside_fast(pt, record["poly"]):
+                score += 1
+        if score > best_score:
+            best_score = score
+            best_record = record
+
+    if best_record:
+        return best_record, "MATCHED"
+
+    if USE_NEAREST_BLOCK_FALLBACK:
+        lot_center = bbox_center(bbox) or polygon_center_xz(poly)
+        if lot_center:
+            nearest_record = None
+            nearest_distance = None
+            for record in block_index.records:
+                block_center = bbox_center(record["bbox"])
+                if not block_center:
+                    continue
+                dist = squared_distance(lot_center, block_center)
+                if nearest_distance is None or dist < nearest_distance:
+                    nearest_distance = dist
+                    nearest_record = record
+            if nearest_record:
+                return nearest_record, "NEAREST"
+
+    return None, "UNMATCHED"
 
 
 def make_block_id(number):
@@ -377,6 +470,7 @@ def build_block_map(blocks):
 def build_lot_map(lots, block_index):
     lot_map = []
     lot_block_matched = 0
+    lot_block_nearest = 0
     safe_print("Lot map бэлдэж байна...")
 
     for idx, lot in enumerate(lots):
@@ -387,17 +481,16 @@ def build_lot_map(lots, block_index):
         if len(poly) < 3:
             continue
 
-        center = polygon_center_xz(poly)
-        if not center:
-            continue
+        bbox = polygon_bbox(poly)
 
         block_id = ""
         block_status = "UNMATCHED"
-        block_record = find_containing_record(center, block_index) if block_index else None
+        block_record, block_status = find_best_block_for_lot(poly, bbox, block_index)
         if block_record:
             block_id = block_record["id"]
-            block_status = "MATCHED"
             lot_block_matched += 1
+            if block_status == "NEAREST":
+                lot_block_nearest += 1
 
         lot_id = get_attribute_text(lot, LOT_ID_FIELD, "") or get_oid_text(lot, "L")
         area = polygon_area_xz(poly)
@@ -416,14 +509,21 @@ def build_lot_map(lots, block_index):
                 "block_id": str(block_id),
                 "block_status": block_status,
                 "poly": poly,
-                "bbox": polygon_bbox(poly),
+                "bbox": bbox,
                 "area": area,
                 "gfa": 0.0,
                 "b_count": 0,
             }
         )
 
-    safe_print("Lot map дууслаа: " + str(len(lot_map)))
+    safe_print(
+        "Lot map дууслаа: "
+        + str(len(lot_map))
+        + " | block id орсон: "
+        + str(lot_block_matched)
+        + " | nearest fallback: "
+        + str(lot_block_nearest)
+    )
     return lot_map, lot_block_matched, len(lot_map) - lot_block_matched
 
 

@@ -495,6 +495,11 @@ def find_scene_blocks():
     blocks = []
     safe_print("Scene дотроос Block объектууд хайж байна...")
 
+    try:
+        append_unique(blocks, ce.getObjectsFrom(ce.scene, ce.isBlock))
+    except Exception:
+        pass
+
     append_unique(blocks, ce.getObjectsFrom(ce.scene, ce.isShape, ce.withName("'Block'")))
     append_unique(blocks, ce.getObjectsFrom(ce.scene, ce.isShape, ce.withName("'block'")))
 
@@ -513,14 +518,19 @@ def get_buildings_lots_blocks():
 
     selected_shapes = ce.getObjectsFrom(ce.selection, ce.isShape)
     selected_blocks_by_name = ce.getObjectsFrom(ce.selection, ce.withName("'Block'"))
+    try:
+        selected_block_objects = ce.getObjectsFrom(ce.selection, ce.isBlock)
+    except Exception:
+        selected_block_objects = []
 
-    if selected_shapes or selected_blocks_by_name:
+    if selected_shapes or selected_blocks_by_name or selected_block_objects:
         buildings = []
         lots = []
         blocks = []
 
         safe_print("Сонгогдсон shape: " + str(len(selected_shapes)))
         safe_print("Сонгогдсон Block нэртэй объект: " + str(len(selected_blocks_by_name)))
+        safe_print("Сонгогдсон ce.isBlock объект: " + str(len(selected_block_objects)))
 
         for shape in selected_shapes:
             building_value = get_attribute_text(shape, "building", "")
@@ -537,6 +547,7 @@ def get_buildings_lots_blocks():
         for block in selected_blocks_by_name:
             if block not in blocks:
                 blocks.append(block)
+        append_unique(blocks, selected_block_objects)
 
         if not blocks:
             safe_print("Selection дотор Block олдсонгүй. Scene-ээс block хайна...")
@@ -582,6 +593,7 @@ def build_block_map(blocks):
 
         poly = vertices_to_xz(safe_get_vertices(block))
         if len(poly) < 3:
+            safe_print("   АНХААР: Block geometry уншигдсангүй: " + safe_get_name(block))
             continue
 
         valid_block_number += 1
@@ -805,6 +817,8 @@ def run_optimized_script():
         raise Exception("Block олдсонгүй! Lot-д Block_ID оруулахын тулд Block shape-үүд scene-д байх эсвэл selection-д сонгогдсон байх ёстой.")
 
     block_map = build_block_map(blocks)
+    if not block_map:
+        raise Exception("Block object олдсон боловч geometry уншигдсангүй. Block layer/object-оо selection-д сонгоод дахин ажиллуулна уу.")
 
     safe_print("Block spatial index үүсгэж байна...")
     block_index = SpatialIndex(block_map, BLOCK_GRID_CELL_SIZE) if block_map else None

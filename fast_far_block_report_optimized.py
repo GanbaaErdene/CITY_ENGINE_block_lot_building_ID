@@ -497,9 +497,13 @@ def write_lot_results_and_report(lot_map):
     safe_print("\nLot дээр үр дүн бичиж, CSV үүсгэж байна...")
     safe_print("Нийт Lot: " + str(total_lots))
     report_path = get_report_path()
-    progress_step = max(1, min(100, total_lots // 10 if total_lots else 1))
+    safe_print("CSV файл: " + report_path)
+    safe_print("CSV файл нээж байна...")
 
-    with open(report_path, "w", newline="", encoding="utf-8") as report_file:
+    # CityEngine Python environments can be picky about newline/encoding kwargs.
+    # Plain open() keeps this compatible and lets progress messages reach the console.
+    with open(report_path, "w") as report_file:
+        safe_print("CSV файл нээгдлээ. Lot үр дүн бичиж эхэллээ...")
         writer = csv.writer(report_file)
         writer.writerow(
             [
@@ -514,8 +518,8 @@ def write_lot_results_and_report(lot_map):
         )
 
         for idx, lot in enumerate(lot_map):
-            if idx > 0 and idx % progress_step == 0:
-                safe_print("   Report writing... " + str(idx) + " / " + str(total_lots))
+            lot_number = idx + 1
+            safe_print("   Lot " + str(lot_number) + " / " + str(total_lots) + " бичиж байна...")
 
             far = lot["gfa"] / lot["area"] if lot["area"] > 0 else 0.0
 

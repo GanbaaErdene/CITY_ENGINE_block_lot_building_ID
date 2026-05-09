@@ -486,7 +486,8 @@ def process_buildings(buildings, lot_index, block_index, fallback_block_id):
 
         floors = get_building_floors(building)
         b_area = polygon_area_xz(poly)
-        b_gfa = b_area * floors
+        # User requirement: scale total GFA by floor height as well.
+        b_gfa = b_area * floors * FLOOR_HEIGHT
 
         safe_set_attribute(building, OUT_BUILDING_GFA_FIELD, float(b_gfa))
 

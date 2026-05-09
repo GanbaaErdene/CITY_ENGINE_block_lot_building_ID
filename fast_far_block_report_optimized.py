@@ -36,6 +36,15 @@ BUILDING_RULE_PACKAGES = [
     "BuildingColor",
     "BuildingColor.cga",
 ]
+BUILDINGCOLO_FLOOR_FIELDS = [
+    "building_levels",
+    "building__levels",
+]
+BUILDING_OBJECT_FLOOR_FIELDS = [
+    "building_levels",
+    "building__levels",
+    "Detected_Floors",
+]
 
 LOT_ID_FIELD = "lot_id"
 BLOCK_ID_FIELD = "block_id"
@@ -170,8 +179,40 @@ def safe_get_vertices(obj):
         return None
 
 
+def get_buildingcolo_floor_value(building):
+    candidates = []
+
+    for field_name in BUILDINGCOLO_FLOOR_FIELDS:
+        candidates.append(to_float(safe_get_rule_package_attribute(building, "BuildingColo", field_name), 0.0))
+        candidates.append(to_float(safe_get_rule_attribute(building, "BuildingColo." + field_name), 0.0))
+        candidates.append(to_float(safe_get_rule_attribute(building, "BuildingColo/" + field_name), 0.0))
+        candidates.append(to_float(safe_get_attribute(building, "BuildingColo." + field_name), 0.0))
+        candidates.append(to_float(safe_get_attribute(building, "BuildingColo/" + field_name), 0.0))
+
+    valid = [value for value in candidates if value > 0]
+    if not valid:
+        return 0.0
+
+    return max(valid)
+
+
+def copy_buildingcolo_floors_to_object_attributes(building, fallback_floors):
+    floors = get_buildingcolo_floor_value(building)
+    if floors <= 0:
+        floors = fallback_floors
+
+    for field_name in BUILDING_OBJECT_FLOOR_FIELDS:
+        safe_set_attribute(building, field_name, float(floors))
+
+    return floors
+
+
 def get_building_floors(building):
     candidates = []
+
+    buildingcolo_floors = get_buildingcolo_floor_value(building)
+    if buildingcolo_floors > 0:
+        candidates.append(buildingcolo_floors)
 
     # CityEngine Inspector can show floor count under Rules while Object
     # Attributes still contain a stale/default value. Prefer rule attributes.
@@ -708,11 +749,10 @@ def process_buildings(buildings, lot_index, block_index):
             continue
 
         floors = get_building_floors(building)
+        floors = copy_buildingcolo_floors_to_object_attributes(building, floors)
         b_area = polygon_area_xz(poly)
         b_gfa = b_area * floors
 
-        safe_set_attribute(building, FLOORS_FIELD, float(floors))
-        safe_set_attribute(building, "building_levels", float(floors))
         safe_set_attribute(building, OUT_BUILDING_GFA_FIELD, float(b_gfa))
         safe_set_attribute(building, OUT_BUILDING_FLOORS_FIELD, float(floors))
 

@@ -12,15 +12,21 @@ tested only against nearby polygons instead of every lot and every block.
 ### How to use
 
 1. Open the CityEngine scene.
-2. Confirm these names/attributes match your scene:
+2. Select the Building, Lot, and Block shapes you want to process. If nothing is
+   selected, the script falls back to scene/layer lookup.
+3. Confirm these names/attributes match your scene:
    - Building layer: `OSM_Buildings`
    - Floors attribute: `building__levels`
    - Lot ID attribute: `lot_id`
    - Block ID attribute: `block_id`
-3. Run `fast_far_block_report_optimized.py` from CityEngine's Python scripting
+4. Run `fast_far_block_report_optimized.py` from CityEngine's Python scripting
    environment.
-4. Check the generated CSV in the project `data` folder:
+5. Check the generated CSV in the project `data` folder:
    `Fast_FAR_Block_Report.csv`.
+
+Blocks are renamed and assigned IDs as `block_01`, `block_02`, and so on by
+default. Set `OVERWRITE_BLOCK_IDS = False` in the script if existing block IDs
+should be preserved.
 
 ### Speed tuning
 

@@ -2,10 +2,8 @@
 """
 Optimized CityEngine 2025 script for joining OSM buildings to lots and blocks.
 
-The original script checked every lot and every block for every building. That
-is O(buildings * lots + buildings * blocks), which becomes very slow on large
-scenes. This version builds a lightweight grid spatial index from polygon
-bounding boxes, then tests only nearby lot/block candidates for each building.
+This version builds a lightweight grid spatial index and includes progress
+messages so you can see exactly where the script is working.
 """
 from scripting import *
 
@@ -41,7 +39,7 @@ OUT_BUILDING_FLOORS_FIELD = "Detected_Floors"
 OUT_LOT_MATCH_STATUS_FIELD = "Lot_Match_Status"
 OUT_BLOCK_MATCH_STATUS_FIELD = "Block_Match_Status"
 
-BUILDING_PROGRESS_STEP = 1000
+BUILDING_PROGRESS_STEP = 100
 REPORT_FILE_NAME = "Fast_FAR_Block_Report.csv"
 
 # Leave these as None for automatic sizing. If matching is still slow, set
@@ -49,6 +47,10 @@ REPORT_FILE_NAME = "Fast_FAR_Block_Report.csv"
 LOT_GRID_CELL_SIZE = None
 BLOCK_GRID_CELL_SIZE = None
 MAX_INDEX_CELLS_PER_POLYGON = 400
+
+BLOCK_ID_PREFIX = "block"
+BLOCK_ID_PADDING = 2
+OVERWRITE_BLOCK_IDS = True
 
 
 # ==================================================
@@ -122,6 +124,13 @@ def safe_get_name(obj):
         return ce.getName(obj)
     except Exception:
         return ""
+
+
+def safe_set_name(obj, name):
+    try:
+        ce.setName(obj, name)
+    except Exception:
+        pass
 
 
 def safe_get_vertices(obj):
@@ -258,10 +267,60 @@ def find_containing_record(pt, spatial_index):
     return None
 
 
+def make_block_id(number):
+    return BLOCK_ID_PREFIX + "_" + str(number).zfill(BLOCK_ID_PADDING)
+
+
+def name_startswith(obj, prefix):
+    return safe_get_name(obj).lower().startswith(prefix.lower())
+
+
 # ==================================================
 # DATA COLLECTION
 # ==================================================
 def get_buildings_lots_blocks():
+    safe_print("Selection дотроос объектууд уншиж байна...")
+
+    selected_shapes = ce.getObjectsFrom(ce.selection, ce.isShape)
+    selected_blocks_by_name = ce.getObjectsFrom(ce.selection, ce.withName("'Block'"))
+
+    if selected_shapes or selected_blocks_by_name:
+        buildings = []
+        lots = []
+        blocks = []
+
+        safe_print("Сонгогдсон shape: " + str(len(selected_shapes)))
+        safe_print("Сонгогдсон Block нэртэй объект: " + str(len(selected_blocks_by_name)))
+
+        for shape in selected_shapes:
+            name = safe_get_name(shape)
+            building_value = get_attribute_text(shape, "building", "")
+            lot_id_value = get_attribute_text(shape, LOT_ID_FIELD, "")
+            block_id_value = get_attribute_text(shape, BLOCK_ID_FIELD, "")
+
+            if name.lower() == "lot" or name.lower().startswith("lot") or lot_id_value != "":
+                lots.append(shape)
+            elif name.lower() == "block" or name.lower().startswith("block") or block_id_value != "":
+                blocks.append(shape)
+            elif building_value != "":
+                buildings.append(shape)
+            else:
+                buildings.append(shape)
+
+        for block in selected_blocks_by_name:
+            if block not in blocks:
+                blocks.append(block)
+
+        safe_print(
+            "Selection ангилалт:"
+            + " Buildings: " + str(len(buildings))
+            + " | Lots: " + str(len(lots))
+            + " | Blocks: " + str(len(blocks))
+        )
+        return buildings, lots, blocks
+
+    safe_print("Selection хоосон байна. Scene/layer дотроос хайж байна...")
+
     building_layer = get_layer_by_name(BUILDING_LAYER_NAME)
     buildings = ce.getObjectsFrom(building_layer, ce.isShape)
 
@@ -274,9 +333,9 @@ def get_buildings_lots_blocks():
         blocks = ce.getObjectsFrom(ce.scene, ce.withName("'Block'"))
 
     if not blocks:
-        blocks = [s for s in ce.getObjectsFrom(ce.scene, ce.isShape) if safe_get_name(s).startswith("Block")]
+        blocks = [s for s in ce.getObjectsFrom(ce.scene, ce.isShape) if name_startswith(s, "block")]
     if not lots:
-        lots = [s for s in ce.getObjectsFrom(ce.scene, ce.isShape) if safe_get_name(s).startswith("Lot")]
+        lots = [s for s in ce.getObjectsFrom(ce.scene, ce.isShape) if name_startswith(s, "lot")]
 
     return buildings, lots, blocks
 
@@ -285,23 +344,33 @@ def build_block_map(blocks):
     block_map = []
     safe_print("\nBlock ID үүсгэж байна...")
 
-    for block in blocks:
+    valid_block_number = 0
+    for idx, block in enumerate(blocks):
+        if idx > 0 and idx % 100 == 0:
+            safe_print("   Block processing... " + str(idx) + " / " + str(len(blocks)))
+
         poly = vertices_to_xz(safe_get_vertices(block))
         if len(poly) < 3:
             continue
 
-        block_id = get_attribute_text(block, BLOCK_ID_FIELD, "")
+        valid_block_number += 1
+        if OVERWRITE_BLOCK_IDS:
+            block_id = make_block_id(valid_block_number)
+        else:
+            block_id = get_attribute_text(block, BLOCK_ID_FIELD, "")
         if not block_id:
             block_id = get_oid_text(block, "B")
 
         area = polygon_area_xz(poly)
         bbox = polygon_bbox(poly)
+        safe_set_name(block, block_id)
         safe_set_attribute(block, BLOCK_ID_FIELD, block_id)
         safe_set_attribute(block, OUT_BLOCK_ID_FIELD, block_id)
         safe_set_attribute(block, OUT_BLOCK_AREA_FIELD, float(area))
 
         block_map.append({"obj": block, "id": str(block_id), "poly": poly, "bbox": bbox, "area": area})
 
+    safe_print("Block map дууслаа: " + str(len(block_map)))
     return block_map
 
 
@@ -310,7 +379,10 @@ def build_lot_map(lots, block_index):
     lot_block_matched = 0
     safe_print("Lot map бэлдэж байна...")
 
-    for lot in lots:
+    for idx, lot in enumerate(lots):
+        if idx > 0 and idx % 100 == 0:
+            safe_print("   Lot processing... " + str(idx) + " / " + str(len(lots)))
+
         poly = vertices_to_xz(safe_get_vertices(lot))
         if len(poly) < 3:
             continue
@@ -351,6 +423,7 @@ def build_lot_map(lots, block_index):
             }
         )
 
+    safe_print("Lot map дууслаа: " + str(len(lot_map)))
     return lot_map, lot_block_matched, len(lot_map) - lot_block_matched
 
 
@@ -363,7 +436,7 @@ def process_buildings(buildings, lot_index, block_index):
 
     for idx, building in enumerate(buildings):
         if idx > 0 and idx % BUILDING_PROGRESS_STEP == 0:
-            safe_print("Processing... " + str(idx) + " / " + str(len(buildings)))
+            safe_print("   Building processing... " + str(idx) + " / " + str(len(buildings)))
 
         poly = vertices_to_xz(safe_get_vertices(building))
         if len(poly) < 3:
@@ -402,6 +475,7 @@ def process_buildings(buildings, lot_index, block_index):
             safe_set_attribute(building, OUT_BLOCK_MATCH_STATUS_FIELD, "UNMATCHED")
             stats["ub"] += 1
 
+    safe_print("Барилгын тулгалт дууслаа.")
     return stats
 
 
@@ -419,8 +493,11 @@ def get_report_path():
 
 
 def write_lot_results_and_report(lot_map):
+    total_lots = len(lot_map)
     safe_print("\nLot дээр үр дүн бичиж, CSV үүсгэж байна...")
+    safe_print("Нийт Lot: " + str(total_lots))
     report_path = get_report_path()
+    progress_step = max(1, min(100, total_lots // 10 if total_lots else 1))
 
     with open(report_path, "w", newline="", encoding="utf-8") as report_file:
         writer = csv.writer(report_file)
@@ -436,7 +513,10 @@ def write_lot_results_and_report(lot_map):
             ]
         )
 
-        for lot in lot_map:
+        for idx, lot in enumerate(lot_map):
+            if idx > 0 and idx % progress_step == 0:
+                safe_print("   Report writing... " + str(idx) + " / " + str(total_lots))
+
             far = lot["gfa"] / lot["area"] if lot["area"] > 0 else 0.0
 
             safe_set_attribute(lot["obj"], OUT_TOTAL_GFA_FIELD, float(lot["gfa"]))
@@ -455,6 +535,7 @@ def write_lot_results_and_report(lot_map):
                 ]
             )
 
+    safe_print("Report writing дууслаа: " + str(total_lots) + " lot бичигдлээ.")
     safe_print("[АМЖИЛТТАЙ] CSV тайлан: " + report_path)
 
 
@@ -469,6 +550,8 @@ def run_optimized_script():
         raise Exception("Lot олдсонгүй!")
 
     block_map = build_block_map(blocks)
+
+    safe_print("Block spatial index үүсгэж байна...")
     block_index = SpatialIndex(block_map, BLOCK_GRID_CELL_SIZE) if block_map else None
     if block_index:
         safe_print(
@@ -483,6 +566,8 @@ def run_optimized_script():
         )
 
     lot_map, l_m, l_um = build_lot_map(lots, block_index)
+
+    safe_print("Lot spatial index үүсгэж байна...")
     lot_index = SpatialIndex(lot_map, LOT_GRID_CELL_SIZE) if lot_map else None
     if lot_index:
         safe_print(
